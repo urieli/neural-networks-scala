@@ -3,10 +3,13 @@ package neuralNetworks
 import breeze.linalg._
 import breeze.numerics._
 import breeze.stats.distributions.Rand
+import org.rogach.scallop.ScallopConf
 import org.slf4j.LoggerFactory
 
 class NeuralNetwork(sizes: Seq[Int]) {
   private val log = LoggerFactory.getLogger(getClass)
+
+  val numLayers = sizes.size
 
   /** Biases for layers 1 to n-1.
    */
@@ -15,7 +18,8 @@ class NeuralNetwork(sizes: Seq[Int]) {
   /** Weights from layer i-1 to i, for layers 1 to n-1.
    *  Each m X n matrix has m rows for the current layer, and n columns for the weights input from the previous layer.
    */
-  var weights: Seq[DenseMatrix[Double]] = sizes.tail.foldLeft((sizes.head, Seq.empty[DenseMatrix[Double]])) { case ((prev, weights), current) => (current, weights :+ DenseMatrix.rand(current, prev, Rand.gaussian)) }._2
+  var weights: Seq[DenseMatrix[Double]] =
+    sizes.init.zip(sizes.tail).map { case (prev, current) => DenseMatrix.rand(current, prev, Rand.gaussian) }
 
   /** Network output if `a` is the input.
    *
@@ -23,7 +27,7 @@ class NeuralNetwork(sizes: Seq[Int]) {
    *  @return the output vector
    */
   def feedForward(a: DenseVector[Double]): DenseVector[Double] = {
-    assert(a.length == sizes.head, "`a` must have same dimension as input layer")
+    assert(a.size == sizes.head, "`a` must have same dimension as input layer")
     biases.zip(weights).foldLeft(a) { case (a, (b, w)) => sigmoid((w * a) + b) }
   }
 
@@ -33,7 +37,7 @@ class NeuralNetwork(sizes: Seq[Int]) {
    *  @param trainingData  a list of tuples `(x, y)` representing the training inputs and the desired outputs.
    *  @param epochs        number of training epochs
    *  @param miniBatchSize size of each mini-batch
-   *  @param ϵ             the learning rate
+   *  @param η             the learning rate
    *  @param testData      If provided, then the network will be evaluated against the test data after each
    *                      epoch, and partial progress printed out.  This is useful for
    *                      tracking progress, but slows things down substantially.
@@ -42,15 +46,15 @@ class NeuralNetwork(sizes: Seq[Int]) {
     trainingData: Seq[(DenseVector[Double], DenseVector[Double])],
     epochs: Int,
     miniBatchSize: Int,
-    ϵ: Double,
+    η: Double,
     testData: Option[Seq[(DenseVector[Double], DenseVector[Double])]] = None): Unit = {
     for (i <- 0 to epochs) {
-      val miniBatches = Rand.permutation(trainingData.length).draw().grouped(miniBatchSize)
+      val miniBatches = Rand.permutation(trainingData.size).draw().grouped(miniBatchSize)
         .map(indexes => indexes.map(i => trainingData(i)))
-      miniBatches.foreach(miniBatch => this.updateMiniBatch(miniBatch, ϵ))
+      miniBatches.foreach(miniBatch => this.updateMiniBatch(miniBatch, η))
       testData match {
         case Some(testData) =>
-          log.info(f"Epoch $i: ${this.evaluate(testData)} / ${testData.length}")
+          log.info(f"Epoch $i: ${this.evaluate(testData)} / ${testData.size}")
         case None =>
           log.info(f"Epoch $i complete")
       }
@@ -61,10 +65,10 @@ class NeuralNetwork(sizes: Seq[Int]) {
    *  gradient descent using backpropagation to a single mini batch.
    *
    *  @param miniBatch a list of input/output tuples `(x, y)`
-   *  @param ϵ         the learning rate
+   *  @param η         the learning rate
    */
-  def updateMiniBatch(miniBatch: Seq[(DenseVector[Double], DenseVector[Double])], ϵ: Double): Unit = {
-    val δb0 = biases.map(b => DenseVector.zeros[Double](b.length))
+  def updateMiniBatch(miniBatch: Seq[(DenseVector[Double], DenseVector[Double])], η: Double): Unit = {
+    val δb0 = biases.map(b => DenseVector.zeros[Double](b.size))
     val δw0 = weights.map(w => DenseMatrix.zeros[Double](w.rows, w.cols))
     val (δb, δw) = miniBatch.foldLeft((δb0, δw0)) {
       case ((δbPrev, δwPrev), (x, y)) =>
@@ -74,8 +78,8 @@ class NeuralNetwork(sizes: Seq[Int]) {
         (δbNext, δwNext)
     }
 
-    weights = weights.zip(δw).map { case (w, δw) => w - ((ϵ / miniBatch.length) * δw) }
-    biases = biases.zip(δb).map { case (b, δb) => b - ((ϵ / miniBatch.length) * δb) }
+    weights = weights.zip(δw).map { case (w, δw) => w - ((η / miniBatch.size) * δw) }
+    biases = biases.zip(δb).map { case (b, δb) => b - ((η / miniBatch.size) * δb) }
   }
 
   /** Back propagate for input activation x and expected output y.
@@ -84,9 +88,12 @@ class NeuralNetwork(sizes: Seq[Int]) {
    *  @param y the expected output vector
    *  @return the gradient to the cost function, as layer-by-layer deltas to apply to the biases and weights respectively.
    */
-  def backPropagate(x: DenseVector[Double], y: DenseVector[Double]): (Seq[DenseVector[Double]], Seq[DenseMatrix[Double]]) = {
-    assert(x.length == sizes.head, "`x` must have same dimension as input layer")
-    assert(y.length == sizes.last, "`y` must have same dimension as output layer")
+  def backPropagate(x: DenseVector[Double], y: DenseVector[Double]): (Array[DenseVector[Double]], Array[DenseMatrix[Double]]) = {
+    assert(x.size == sizes.head, "`x` must have same dimension as input layer")
+    assert(y.size == sizes.last, "`y` must have same dimension as output layer")
+
+    val δbs = new Array[DenseVector[Double]](biases.size)
+    val δws = new Array[DenseMatrix[Double]](weights.size)
 
     // feed forward
     val (_, as, zs) = biases.zip(weights).foldLeft((x, Seq(x), Seq.empty[DenseVector[Double]])) {
@@ -96,46 +103,21 @@ class NeuralNetwork(sizes: Seq[Int]) {
         (a, as :+ a, zs :+ z)
     }
 
-    if (log.isTraceEnabled) {
-      log.trace(f"as (${as.length}): $as")
-      log.trace(f"zs (${zs.length}): $zs")
-    }
-
-    val aRev = as.reverse
-    val zRev = zs.reverse
-    val wRev = weights.reverse
-
     // backwards pass
-    val δ = costDerivative(aRev.head, y) *:* sigmoidPrime(zRev.head)
-    val δw = δ.toDenseMatrix.t * aRev(1).toDenseMatrix
+    var δ = costDerivative(as.last, y) *:* sigmoidPrime(zs.last)
+    δbs(δbs.size - 1) = δ
+    δws(δws.size - 1) = δ.toDenseMatrix.t * as(as.size - 2).toDenseMatrix
 
-    if (log.isTraceEnabled) {
-      log.trace(f"###output layer")
-      log.trace(f"δ (${δ.length}): $δ")
-      log.trace(f"aRev(1) (${aRev(1).length}): ${aRev(1)}")
-      log.trace(f"δw (${δw.rows}X${δw.cols}): $δw")
+    for (l <- 2 until numLayers) {
+      val z = zs(zs.size - l)
+      val sp = sigmoidPrime(z)
+      δ = (weights(weights.size - l + 1).t * δ) *:* sp
+      val δw = δ.toDenseMatrix.t * as(as.size - l - 1).toDenseMatrix
+      δbs(δbs.size - l) = δ
+      δws(δws.size - l) = δw
     }
 
-    val (_, δbs, δws, _, _, _) = (wRev.size - 1 to 1 by -1).foldLeft((δ, Seq(δ), Seq(δw), wRev, aRev.tail.tail, zRev.tail)) {
-      case ((δ, δbs, δws, w :: wRev, a :: aRev, z :: zRev), l) =>
-        val sp = sigmoidPrime(z)
-        val δ_next = (w.t * δ) *:* sp
-        val δw = δ_next.toDenseMatrix.t * a.toDenseMatrix
-        if (log.isTraceEnabled) {
-          log.trace(f"###from layer $l")
-          log.trace(f"δ (${δ.length}): $δ")
-          log.trace(f"w (${w.rows}X${w.cols}): $w")
-          log.trace(f"z (${z.length}): $z")
-          log.trace(f"sp (${sp.length}): $sp")
-          log.trace(f"δ_next (${δ_next.length}): ${δ_next}")
-          log.trace(f"a (${a.length}): ${a}")
-          log.trace(f"δw (${δw.rows}X${δw.cols}): $δw")
-        }
-
-        (δ_next, δbs :+ δ_next, δws :+ δw, wRev, aRev, zRev)
-    }
-
-    (δbs.reverse, δws.reverse)
+    (δbs, δws)
   }
 
   /** Return the number of test inputs for which the neural
@@ -159,3 +141,37 @@ class NeuralNetwork(sizes: Seq[Int]) {
 
 }
 
+object NeuralNetwork {
+
+  class Conf(arguments: Seq[String]) extends ScallopConf(arguments) {
+    val imagePath = opt[String](default = Some("data/mnist-train-images-50k.gz"))
+    val labelPath = opt[String](default = Some("data/mnist-train-labels-50k.gz"))
+    val epochs = opt[Int](default = Some(30))
+    val miniBatchSize = opt[Int](default = Some(10))
+    val learningRate = opt[Double](default = Some(3.0d), short = 'r')
+    val testImagePath = opt[String](default = Some("data/mnist-test-images-10k.gz"), short = 'I')
+    val testLabelPath = opt[String](default = Some("data/mnist-test-labels-10k.gz"), short = 'L')
+    val trainSlice = opt[Int](short = 's')
+    val testSlice = opt[Int](short = 'S')
+    verify()
+  }
+
+  def main(args: Array[String]): Unit = {
+    val conf = new Conf(args)
+
+    val trainingData = MNISTLoader.load(conf.imagePath(), conf.labelPath())
+    val trainingSlice = conf.trainSlice.toOption match {
+      case None        => trainingData
+      case Some(slice) => trainingData.slice(0, slice)
+    }
+
+    val testData = conf.testImagePath.toOption.map { case testImagePath => MNISTLoader.load(testImagePath, conf.testLabelPath()) }
+    val testSlice = testData.map(testData => conf.testSlice.toOption match {
+      case None        => testData
+      case Some(slice) => testData.slice(0, slice)
+    })
+
+    val net = new NeuralNetwork(List(784, 30, 10))
+    net.SGD(trainingSlice, conf.epochs(), conf.miniBatchSize(), conf.learningRate(), testSlice)
+  }
+}
