@@ -1,4 +1,4 @@
-package neuralNetworks
+package neuralNetworks.mnist
 
 import java.io.{ DataInputStream, FileInputStream }
 

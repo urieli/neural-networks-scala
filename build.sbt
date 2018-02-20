@@ -12,7 +12,9 @@ libraryDependencies  ++= Seq(
   "org.scalanlp" %% "breeze" % "0.13.2",
   "org.scalanlp" %% "breeze-natives" % "0.13.2",
   "org.apache.commons" % "commons-compress" % "1.16.1",
-  "org.rogach" %% "scallop" % "3.1.1"
+  "org.rogach" %% "scallop" % "3.1.1",
+  "io.spray" %%  "spray-json" % "1.3.3",
+  "com.beachape" %% "enumeratum" % "1.5.12"
 )
 
 
