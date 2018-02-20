@@ -17,8 +17,8 @@ cp data/t10k-labels-idx1-ubyte.gz data/mnist-test-labels-10k.gz
 
 In SBT run the following commands:
 ```
-runMain neuralNetworks.MNISTDataSlicer data/train-images-idx3-ubyte.gz data/train-labels-idx1-ubyte.gz data/mnist-train-images-50k.gz data/mnist-train-labels-50k.gz 0 50000
-runMain neuralNetworks.MNISTDataSlicer data/train-images-idx3-ubyte.gz data/train-labels-idx1-ubyte.gz data/mnist-validate-images-10k.gz data/mnist-validate-labels-10k.gz 50000 10000
+runMain neuralNetworks.mnist.MNISTDataSlicer data/train-images-idx3-ubyte.gz data/train-labels-idx1-ubyte.gz data/mnist-train-images-50k.gz data/mnist-train-labels-50k.gz 0 50000
+runMain neuralNetworks.mnist.MNISTDataSlicer data/train-images-idx3-ubyte.gz data/train-labels-idx1-ubyte.gz data/mnist-validate-images-10k.gz data/mnist-validate-labels-10k.gz 50000 10000
 ```
 
 Your `data` directory should now contain the following files:
