@@ -3,33 +3,56 @@ package neuralNetworks
 import breeze.linalg.{ DenseMatrix, DenseVector, argmax }
 import breeze.numerics._
 import breeze.stats.distributions.Rand
+import neuralNetworks.NeuralNetworkProtocol._
 import neuralNetworks.mnist.MNISTLoader
 import org.rogach.scallop.ScallopConf
 import org.slf4j.LoggerFactory
+import spray.json._
 
 import scala.collection.mutable.ArrayBuffer
 import scala.math.pow
 
-import NeuralNetworkProtocol._
-import spray.json._
-
+/** *
+ *  Construct a neural network from weights and biases.
+ *
+ *  @param _weights Weights from layer i-1 to i, for layers 1 to n-1.
+ *                 Each m X n matrix has m rows for the current layer, and n columns for the weights input from the previous layer.
+ *  @param _biases  Biases for layers 1 to n-1.
+ *  @param cost     the cost function
+ */
 class NeuralNetwork2(
-    val sizes: Vector[Int],
-    val cost: CostFunction = CostFunction.CrossEntropyCost,
-    val weightInitializer: WeightInitializer = WeightInitializer.DefaultWeightInitializer) {
+    private var _weights: Vector[DenseMatrix[Double]],
+    private var _biases: Vector[DenseVector[Double]],
+    val cost: CostFunction) {
+
+  /** Construct a neural network given the sizes of the layers and a method for initializing the weights.
+   *
+   *  @param sizes             the number of neurons in each layer of the network
+   *  @param weightInitializer for initializing the network weights
+   *  @param cost              the cost function
+   */
+  def this(
+    sizes: Vector[Int],
+    weightInitializer: WeightInitializer = WeightInitializer.DefaultWeightInitializer,
+    cost: CostFunction = CostFunction.CrossEntropyCost) {
+    this(
+      sizes.init.zip(sizes.tail).map { case (prev, current) => weightInitializer.initMatrix(current, prev) },
+      sizes.tail.map(size => DenseVector.rand(size, Rand.gaussian)),
+      cost)
+  }
+
   private val log = LoggerFactory.getLogger(getClass)
 
-  val numLayers = sizes.size
-
-  /** Biases for layers 1 to n-1.
+  /** Read-only view to network weights.
    */
-  var biases: Vector[DenseVector[Double]] = sizes.tail.map(size => DenseVector.rand(size, Rand.gaussian))
+  def weights = _weights
 
-  /** Weights from layer i-1 to i, for layers 1 to n-1.
-   *  Each m X n matrix has m rows for the current layer, and n columns for the weights input from the previous layer.
+  /** Read-only view to network biases.
    */
-  var weights: Vector[DenseMatrix[Double]] =
-    sizes.init.zip(sizes.tail).map { case (prev, current) => weightInitializer.initMatrix(current, prev) }
+  def biases = _biases
+
+  private val sizes = _weights.head.cols +: _weights.map(_.rows)
+  private val numLayers = sizes.size
 
   /** Network output if `a` is the input.
    *
@@ -38,7 +61,7 @@ class NeuralNetwork2(
    */
   def feedForward(a: DenseVector[Double]): DenseVector[Double] = {
     assert(a.length == sizes.head, "`a` must have same dimension as input layer")
-    biases.zip(weights).foldLeft(a) { case (a, (b, w)) => sigmoid((w * a) + b) }
+    _biases.zip(_weights).foldLeft(a) { case (a, (b, w)) => sigmoid((w * a) + b) }
   }
 
   /** Train the neural network using mini-batch stochastic
@@ -110,8 +133,8 @@ class NeuralNetwork2(
    *  @param n         the total size of the training set data
    */
   def updateMiniBatch(miniBatch: Seq[(DenseVector[Double], DenseVector[Double])], η: Double, λ: Double, n: Double): Unit = {
-    val δb0 = biases.map(b => DenseVector.zeros[Double](b.length))
-    val δw0 = weights.map(w => DenseMatrix.zeros[Double](w.rows, w.cols))
+    val δb0 = _biases.map(b => DenseVector.zeros[Double](b.length))
+    val δw0 = _weights.map(w => DenseMatrix.zeros[Double](w.rows, w.cols))
     val (δb, δw) = miniBatch.foldLeft((δb0, δw0)) {
       case ((δbPrev, δwPrev), (x, y)) =>
         val (δb, δw) = this.backPropagate(x, y)
@@ -120,8 +143,8 @@ class NeuralNetwork2(
         (δbNext, δwNext)
     }
 
-    weights = weights.zip(δw).map { case (w, δw) => (1 - η * (λ / n)) * w - ((η / miniBatch.length) * δw) }
-    biases = biases.zip(δb).map { case (b, δb) => b - ((η / miniBatch.length) * δb) }
+    _weights = _weights.zip(δw).map { case (w, δw) => (1 - η * (λ / n)) * w - ((η / miniBatch.length) * δw) }
+    _biases = _biases.zip(δb).map { case (b, δb) => b - ((η / miniBatch.length) * δb) }
   }
 
   /** Back propagate for input activation x and expected output y.
@@ -134,11 +157,11 @@ class NeuralNetwork2(
     assert(x.size == sizes.head, "`x` must have same dimension as input layer")
     assert(y.size == sizes.last, "`y` must have same dimension as output layer")
 
-    val δbs = new Array[DenseVector[Double]](biases.size)
-    val δws = new Array[DenseMatrix[Double]](weights.size)
+    val δbs = new Array[DenseVector[Double]](_biases.size)
+    val δws = new Array[DenseMatrix[Double]](_weights.size)
 
     // feed forward
-    val (_, as, zs) = biases.zip(weights).foldLeft((x, Seq(x), Seq.empty[DenseVector[Double]])) {
+    val (_, as, zs) = _biases.zip(_weights).foldLeft((x, Seq(x), Seq.empty[DenseVector[Double]])) {
       case ((x, as, zs), (b, w)) =>
         val z = (w * x) + b
         val a = sigmoid(z)
@@ -153,7 +176,7 @@ class NeuralNetwork2(
     for (l <- 2 until numLayers) {
       val z = zs(zs.size - l)
       val sp = sigmoidPrime(z)
-      δ = (weights(weights.size - l + 1).t * δ) *:* sp
+      δ = (_weights(_weights.size - l + 1).t * δ) *:* sp
       val δw = δ.toDenseMatrix.t * as(as.size - l - 1).toDenseMatrix
       δbs(δbs.size - l) = δ
       δws(δws.size - l) = δw
@@ -188,7 +211,7 @@ class NeuralNetwork2(
       case (c, (x, y)) =>
         val a = feedForward(x)
         c + (cost(a, y) / data.size)
-    }) + 0.5 * (λ / data.size) * weights.foldLeft(0.0) {
+    }) + 0.5 * (λ / data.size) * _weights.foldLeft(0.0) {
       case (s, w) =>
         s + pow(frobeniusNorm(w), 2)
     }
@@ -205,17 +228,14 @@ class NeuralNetwork2(
   override def equals(other: Any): Boolean = other match {
     case that: NeuralNetwork2 =>
       (that canEqual this) &&
-        numLayers == that.numLayers &&
-        biases == that.biases &&
-        weights == that.weights &&
-        sizes == that.sizes &&
-        cost == that.cost &&
-        weightInitializer == that.weightInitializer
+        _biases == that._biases &&
+        _weights == that._weights &&
+        cost == that.cost
     case _ => false
   }
 
   override def hashCode(): Int = {
-    val state = Seq(numLayers, biases, weights, sizes, cost, weightInitializer)
+    val state = Seq(_biases, _weights, cost)
     state.map(_.hashCode()).foldLeft(0)((a, b) => 31 * a + b)
   }
 }
