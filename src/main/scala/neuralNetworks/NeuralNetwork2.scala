@@ -105,7 +105,7 @@ class NeuralNetwork2(
       }
       if (monitorTrainingAccuracy) {
         trainingAccuracy += this.accuracy(trainingData)
-        log.info(f"Accuracy on training data ${trainingAccuracy.last} / ${trainingData.size}")
+        log.info(f"Accuracy on training data ${trainingAccuracy.last} / ${trainingData.size} = ${trainingAccuracy.last.toDouble / trainingData.size}")
       }
       if (monitorEvaluationCost) {
         testData.foreach { testData =>
@@ -116,7 +116,7 @@ class NeuralNetwork2(
       if (monitorEvaluationAccuracy) {
         testData.foreach { testData =>
           evaluationAccuracy += this.accuracy(testData)
-          log.info(f"Accuracy on evaluation data ${evaluationAccuracy.last} / ${testData.size}")
+          log.info(f"Accuracy on evaluation data ${evaluationAccuracy.last} / ${testData.size} = ${evaluationAccuracy.last.toDouble / testData.size}")
         }
       }
     }
@@ -252,11 +252,13 @@ object NeuralNetwork2 {
     val testLabelPath = opt[String](default = Some("data/mnist-test-labels-10k.gz"), short = 'L')
     val trainSlice = opt[Int](short = 's')
     val testSlice = opt[Int](short = 'S')
-    val l2 = opt[Double](default = Some(5.0), short = 'g')
+    val l2 = opt[Double](default = Some(0.0), short = 'g')
     val monitorEvaluationCost = opt[Boolean](default = Some(false))
     val monitorEvaluationAccuracy = opt[Boolean](default = Some(false))
     val monitorTrainingCost = opt[Boolean](default = Some(false))
     val monitorTrainingAccuracy = opt[Boolean](default = Some(false))
+    val costFunction = opt[String](default = Some(CostFunction.CrossEntropyCost.entryName))
+    val weightInitializer = opt[String](default = Some(WeightInitializer.DefaultWeightInitializer.entryName))
     verify()
   }
 
@@ -275,7 +277,7 @@ object NeuralNetwork2 {
       case Some(slice) => testData.slice(0, slice)
     })
 
-    val net = new NeuralNetwork2(Vector(784, 30, 10))
+    val net = new NeuralNetwork2(Vector(784, 30, 10), weightInitializer = WeightInitializer.withName(conf.weightInitializer()), cost = CostFunction.withName(conf.costFunction()))
     net.SGD(trainingSlice, conf.epochs(), conf.miniBatchSize(), conf.learningRate(), conf.l2(), testSlice,
       conf.monitorEvaluationCost(), conf.monitorEvaluationAccuracy(), conf.monitorTrainingCost(), conf.monitorTrainingAccuracy())
   }
